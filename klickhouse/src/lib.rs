@@ -10,6 +10,8 @@ mod client;
 #[cfg(feature = "compression")]
 mod compression;
 mod convert;
+#[cfg(feature = "connection")]
+pub mod connection;
 /// Error generator functions used by `klickhouse_derive`
 mod errors;
 mod internal_client_in;
