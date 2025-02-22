@@ -132,6 +132,14 @@ impl<W: ClickhouseWrite> InternalClientOut<W> {
         }
     }
 
+    pub async fn send_ping(&mut self) -> Result<()> {
+        self.writer
+            .write_var_uint(protocol::ClientPacketId::Ping as u64)
+            .await?;
+        self.writer.flush().await?;
+        Ok(())
+    }
+
     #[allow(clippy::needless_lifetimes)]
     pub async fn send_query<'a>(&mut self, params: Query<'a>) -> Result<()> {
         self.writer

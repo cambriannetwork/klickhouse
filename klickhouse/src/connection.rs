@@ -118,6 +118,10 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
                 Ok(ServerPacket::Data(block)) => return Some(Ok(block.block)),
                 Ok(ServerPacket::EndOfStream) => return None,
                 Ok(ServerPacket::Exception(e)) => return Some(Err(e.emit())),
+                Ok(ServerPacket::Progress(p)) => {
+                    let _ = self.progress.send(p);
+                    continue;
+                }
                 Ok(_) => continue,
                 Err(e) => return Some(Err(e)),
             }
@@ -129,6 +133,10 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
             match self.input.receive_packet().await {
                 Ok(ServerPacket::EndOfStream) => return Ok(()),
                 Ok(ServerPacket::Exception(e)) => return Err(e.emit()),
+                Ok(ServerPacket::Progress(p)) => {
+                    let _ = self.progress.send(p);
+                    continue;
+                }
                 Ok(_) => continue,
                 Err(e) => return Err(e),
             }
@@ -146,6 +154,17 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         });
         Ok(stream)
     }
+
+    /// Sends a ping to the server and waits for a pong to check if the connection is alive.
+    pub async fn ping_pong(&mut self) -> Result<()> {
+        self.output.send_ping().await?;
+        match self.input.receive_packet().await {
+            Ok(ServerPacket::Pong) => Ok(()),
+            Ok(_) => Err(KlickhouseError::ProtocolError("unexpected packet from server".to_string())),
+            Err(e) => Err(e),
+        }
+    }
+
 
     /// Sends a query string over native protocol and returns a stream of blocks.
     /// The stream will contain blocks with rows.
