@@ -19,7 +19,7 @@ use crate::{
         InternalClientOut, 
         Query, QueryKind, 
         QueryProcessingStage
-    }, io::{ClickhouseRead, ClickhouseWrite}, protocol::{self, CompressionMethod, ServerPacket}, ClientOptions, KlickhouseError, ParsedQuery, Progress, RawRow, Result, Row
+    }, io::{ClickhouseRead, ClickhouseWrite}, protocol::{self, CompressionMethod, ServerPacket}, ClientOptions, KlickhouseError, ParsedQuery, Progress, Result, Row, Type, Value
 };
 
 // Maximum number of progress statuses to keep in memory. New statuses evict old ones.
@@ -124,6 +124,18 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         }
     }
 
+    async fn discard_blocks(&mut self) -> Result<()> {
+        loop {
+            match self.input.receive_packet().await {
+                Ok(ServerPacket::EndOfStream) => return Ok(()),
+                Ok(ServerPacket::Exception(e)) => return Err(e.emit()),
+                Ok(_) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+
     fn receive_blocks<'a>(&'a mut self) -> Result<impl Stream<Item = Result<Block>> + Send +  'a> {
         let stream = futures_util::stream::unfold(self, |this| async {
             match this.receive_block().await {
@@ -135,6 +147,10 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         Ok(stream)
     }
 
+    /// Sends a query string over native protocol and returns a stream of blocks.
+    /// The stream will contain blocks with rows.
+    /// You probably want [`Connection::query`].
+    /// **Note**: This function will return a stream without 'Unpin' bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
     pub async fn query_raw<'a>(&'a mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<impl Stream<Item = Result<Block>> + Send  + 'a> {
         self.send_query(query).await?;
         self.receive_blocks().map(|stream| ::tokio_stream::StreamExt::filter(stream, | response | match response {
@@ -143,10 +159,9 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         }))
     }
 
-
     /// Sends a query string with streaming associated data (i.e. insert) over native protocol.
-    /// Once all outgoing blocks are written (EOF of `blocks` stream), then any response blocks from Clickhouse are read.
-    /// You probably want [`Connection::insert_native`].
+    /// Once all outgoing blocks are written (EOF of `blocks` stream), then any response blocks from Clickhouse are read and DISCARDED.
+    /// You probably want [`Connection::insert`].
     pub async fn insert_raw(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -161,16 +176,14 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
         self.send_empty_block().await?;
 
-        while let Some(_) = self.receive_block().await {
-            // Discard all response blocks
-        }
+        self.discard_blocks().await?;
     
         Ok(())
     }
    
     /// Sends a query string with streaming associated data (i.e. insert) over native protocol.
     /// Once all outgoing blocks are written (EOF of `blocks` stream), then any response blocks from Clickhouse are read and DISCARDED.
-    /// Make sure any query you send native data with has a `format native` suffix.
+    /// Make sure any query you send native data with has a [`format native`](https://clickhouse.com/docs/integrations/data-formats/binary-native) suffix.
     pub async fn insert<T: Row + Send + Sync + 'static>(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -223,15 +236,34 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
         self.send_empty_block().await?;
 
-        while let Some(_) = self.receive_block().await {
-            // Discard all response blocks
-        }
+        self.discard_blocks().await?;
 
         Ok(())
     }
 
-    /// Wrapper over [`Client::insert_native`] to send a single block.
-    /// Make sure any query you send native data with has a `format native` suffix.
+    /// Runs a query against Clickhouse, returning a stream of deserialized rows.
+    /// Note that no rows are returned until Clickhouse sends a full block (but it usually sends more than one block).
+    /// **Note**: This function will return a stream without `Unpin` bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
+    pub async fn query<'a,T: Row + Send + 'a>(
+        &'a mut self,
+        query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
+    ) -> Result<impl Stream<Item = Result<T>> + Send  + 'a> {
+        
+        let stream = self.query_raw(query).await?;
+        
+        Ok(stream.flat_map(|b| match b {
+            Ok(mut block) => stream::iter(
+                block
+                    .take_iter_rows()
+                    .filter(|x| !x.is_empty())
+                    .map(|m| T::deserialize_row(m))
+                    .collect::<Vec<_>>(),
+            ),
+            Err(e) => stream::iter(vec![Err(e)]),
+        }))
+    }
+
+    /// Same as [`Connection::insert`], but inserts a single batch of rows instead of a stream.
     pub async fn insert_vec<T: Row + Send + Sync + 'static>(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -280,37 +312,14 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
         self.send_empty_block().await?;
 
-
-        while let Some(_) = self.receive_block().await {
-            // Discard all response blocks
-        }
+        self.discard_blocks().await?;
 
         Ok(())
     }
 
-    /// Runs a query against Clickhouse, returning a stream of deserialized rows.
-    /// Note that no rows are returned until Clickhouse sends a full block (but it usually sends more than one block).
-    pub async fn query<'a,T: Row + Send + 'a>(
-        &'a mut self,
-        query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
-    ) -> Result<impl Stream<Item = Result<T>> + Send  + 'a> {
-        
-        let stream = self.query_raw(query).await?;
-        
-        Ok(stream.flat_map(|b| match b {
-            Ok(mut block) => stream::iter(
-                block
-                    .take_iter_rows()
-                    .filter(|x| !x.is_empty())
-                    .map(|m| T::deserialize_row(m))
-                    .collect::<Vec<_>>(),
-            ),
-            Err(e) => stream::iter(vec![Err(e)]),
-        }))
-    }
 
-    /// Same as `query`, but collects all rows into a `Vec`
-    pub async fn query_collect<'a, T: Row + Send + 'a>(
+    /// Same as [`Connection::query`], but collects all rows into a `Vec`
+    pub async fn query_vec<'a, T: Row + Send + 'a>(
         &'a mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
     ) -> Result<Vec<T>> {
@@ -329,25 +338,8 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
     }
 
-    /// Same as `query`, but returns the first row and discards the rest.
-    pub async fn query_on<'a, T: Row + Send + 'a>(
-        &'a mut self,
-        query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
-    ) -> Result<T> {
-
-        let stream =  self.query::<T>(query)
-        .await?;
-        
-        pin_mut!(stream);
-
-        stream
-        .next()
-        .await
-        .unwrap_or_else(|| Err(KlickhouseError::MissingRow))
-    }
-
-    /// Same as `query`, but returns the first row, if any, and discards the rest.
-    pub async fn query_opt<'a, T: Row + Send + 'a>(
+    /// Same as [`Connection::query`], but returns the first row, if any, and discards the rest.
+    pub async fn query_first<'a, T: Row + Send + 'a>(
         &'a mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
     ) -> Result<Option<T>> {
@@ -360,29 +352,30 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         stream.next().await.transpose()
     }
 
-    /// Same as `query`, but discards all returns blocks. Waits until the first block returns from the server to check for errors.
-    /// Waiting for the first response block or EOS also prevents the server from aborting the query potentially due to client disconnection.
+    /// Same as [`Connection::query`], but returns the first value of the first row, if any, and discards the rest.
     pub async fn execute(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
-    ) -> Result<()> {
-        let stream = self.query::<RawRow>(query).await?;
+    ) -> Result<Option<(String,Type,Value)>> {
 
-        pin_mut!(stream);
+        self.send_query(query).await?;
 
-        while let Some(next) = stream.next().await {
-            next?;
+        let mut result = None;
+
+        while let Some(Ok(mut block)) = self.receive_block().await {
+            if let Some(row) = block.take_iter_rows().next() {
+                if let Some((key, ty, value)) = row.into_iter().next() {
+                    result = Some((key.to_owned(), ty.clone(), value));
+                    break;
+                }
+            }
         }
-        Ok(())
-    }
+       
+        if result.is_some() {
+            self.discard_blocks().await?;
+        }
 
-    /// Same as `execute`, but doesn't wait for a server response. The query could get aborted if the connection is closed quickly.
-    pub async fn execute_now(
-        &mut self,
-        query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
-    ) -> Result<()> {
-        let _ = self.query::<RawRow>(query).await?;
-        Ok(())
+        Ok(result)
     }
 
     /// Receive progress on the queries as they execute.
