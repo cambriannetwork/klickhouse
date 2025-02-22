@@ -10,6 +10,8 @@ pub mod test_nested;
 pub mod test_ordering;
 pub mod test_raw_string;
 pub mod test_serialize;
+#[cfg(feature = "connection")]
+pub mod test_connection;
 
 use klickhouse::{Client, ClientOptions};
 
