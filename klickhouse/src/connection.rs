@@ -282,6 +282,25 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         }))
     }
 
+    /// Same as [`Connection::insert_raw`], but inserts a single batch of blocks instead of a stream.
+    pub async fn insert_vec_raw(
+        &mut self,
+        query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
+        blocks: Vec<Block>,
+    ) -> Result<()> {
+        self.send_query(query).await?;
+
+        for block in blocks {
+            self.send_data(block).await?;
+        }
+
+        self.send_empty_block().await?;
+
+        self.discard_blocks().await?;
+
+        Ok(())
+    }
+
     /// Same as [`Connection::insert`], but inserts a single batch of rows instead of a stream.
     pub async fn insert_vec<T: Row + Send + Sync + 'static>(
         &mut self,
