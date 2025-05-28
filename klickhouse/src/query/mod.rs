@@ -16,7 +16,7 @@ impl ParsedQuery {
         ParsedQuery { id: None, query }
     }
 
-    pub fn with_id(mut self, id: String) -> Self {
+    fn with_id(mut self, id: String) -> Self {
         self.id = Some(id);
         self
     }
@@ -56,15 +56,15 @@ impl TryInto<ParsedQuery> for &String {
     }
 }
 
-/// TT: No blanket implementation, strange.
-impl TryInto<ParsedQuery> for  Result<ParsedQuery> {
+impl<T1:AsRef<str>,T2:AsRef<str>> TryInto<ParsedQuery> for (T1,T2){
     type Error = KlickhouseError;
 
     fn try_into(self) -> Result<ParsedQuery> {
-        self
+        let query = self.1.as_ref().to_owned();
+        let id = self.0.as_ref().to_owned();
+        Ok(ParsedQuery::new(query).with_id(id))
     }
 }
-
 
 #[derive(Clone)]
 pub struct QueryBuilder<'a> {
