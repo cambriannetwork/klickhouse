@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use klickhouse::connection::TcpConnection;
 use klickhouse::{connection::connect, ClientOptions};
-use klickhouse::{DateTime, Progress, Row, Type, Value};
+use klickhouse::{DateTime, ParsedQuery, Progress, Row, Type, Value,Result};
 use tokio::select;
 
 async fn get_connection() -> TcpConnection {
@@ -47,6 +47,9 @@ pub struct TestType2 {
 
 const SQL:&str = "SELECT t.generate_series as s,'keeper' as n FROM generate_series(1, 39332) as t";
 
+const INITIAL_QUERY_ID: &str = "test_query_with_id";
+
+const QUERY_ID_SQL: &str = "SELECT 1 FROM system.query_log WHERE initial_query_id = 'test_query_with_id'";
 
 /// Test that the connection can be established and the ping-pong works.
 #[tokio::test]
@@ -219,5 +222,25 @@ async fn test_progress() {
             }
         } => {},
     )
+
+}
+
+/// Test that we can execute a query with a query ID and check if it is logged in the system.query_log
+/// This test is useful to ensure that the query ID functionality works as expected.
+#[tokio::test]
+async fn test_query_id() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
+    let mut conn = get_connection().await;
+
+    let query:Result<ParsedQuery> = SQL.try_into().map(|q:ParsedQuery| q.with_id(INITIAL_QUERY_ID.to_owned()));
+
+    let _ = conn.execute(query).await.unwrap();
+    
+    let log = conn.execute(QUERY_ID_SQL).await.unwrap();
+
+    assert!(log.is_none(), "Query ID not found in system.query_log");
 
 }
