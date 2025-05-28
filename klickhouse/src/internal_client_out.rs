@@ -32,6 +32,7 @@ pub enum QueryKind {
     SecondaryQuery,
 }
 
+#[derive(Clone)]
 pub struct ClientInfo<'a> {
     pub kind: QueryKind,
     pub initial_user: &'a str,
@@ -96,6 +97,7 @@ impl ClientInfo<'_> {
     }
 }
 
+#[derive(Clone)]
 pub struct OpenTelemetry<'a> {
     trace_id: Uuid,
     span_id: u64,
