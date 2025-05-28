@@ -318,7 +318,7 @@ impl Client {
         self.sender
             .send(ClientRequest {
                 data: ClientRequestData::Query {
-                    query: query.try_into()?.0,
+                    query: query.try_into()?.query,
                     response: sender,
                 },
             })
@@ -361,7 +361,7 @@ impl Client {
         self.sender
             .send(ClientRequest {
                 data: ClientRequestData::Query {
-                    query: query.try_into()?.0,
+                    query: query.try_into()?.query,
                     response: sender,
                 },
             })
@@ -397,7 +397,7 @@ impl Client {
         self.sender
             .send(ClientRequest {
                 data: ClientRequestData::Query {
-                    query: query.try_into()?.0.trim().to_string(),
+                    query: query.try_into()?.query.trim().to_string(),
                     response: sender,
                 },
             })

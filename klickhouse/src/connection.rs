@@ -25,11 +25,32 @@ use crate::{
 // Maximum number of progress statuses to keep in memory. New statuses evict old ones.
 const PROGRESS_CAPACITY: usize = 100;
 
+// Default client info used for connections that do not specify their own.
+pub const DEFAULT_CLIENT_INFO: ClientInfo<'static> = ClientInfo {
+                    kind: QueryKind::InitialQuery,
+                    initial_user: "",
+                    initial_query_id: "",
+                    initial_address: "0.0.0.0:0",
+                    os_user: "",
+                    client_hostname: "localhost",
+                    client_name: "ClickHouseclient",
+                    client_version_major: crate::VERSION_MAJOR,
+                    client_version_minor: crate::VERSION_MINOR,
+                    client_tcp_protocol_version: protocol::DBMS_TCP_PROTOCOL_VERSION,
+                    quota_key: "",
+                    distributed_depth: 1,
+                    client_version_patch: 1,
+                    open_telemetry: None,
+                };
+
+
 pub struct Connection<R: ClickhouseRead, W: ClickhouseWrite> {
     input: InternalClientIn<R>,
     output: InternalClientOut<W>,
     progress: broadcast::Sender<Progress>,
+    info: ClientInfo<'static>,
 }
+
 
 
 /// This is lightweight connection to Clickhouse.
@@ -37,7 +58,7 @@ pub struct Connection<R: ClickhouseRead, W: ClickhouseWrite> {
 /// It is used to send queries and receive responses.
 impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
-    async fn new(reader: R, writer: W, options: ClientOptions) -> Result<Self> {
+    async fn new(reader: R, writer: W, options: ClientOptions, info:ClientInfo<'static>) -> Result<Self> {
         let mut input = InternalClientIn::new(reader);
         let mut output = InternalClientOut::new(writer);
         
@@ -55,6 +76,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
             input,
             output,
             progress: broadcast::channel(PROGRESS_CAPACITY).0,
+            info,
         })
     }
 
@@ -81,27 +103,24 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
     
     async fn send_query(&mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<()> {
-        let query = query.try_into()?.0.trim().to_string();
-        let id = Uuid::new_v4();
+        let parsed_query:ParsedQuery = query.try_into()?;
+        let query = parsed_query.query.trim().to_string();
+        // This is query id which needs to be unique for each query executing on a cluster node.
+        // It can not be used to identify a query in a cluster, but it is used to identify a query in a single node.
+        // We need to use initial_query_id to relate client requests.
+
+        let query_id = Uuid::new_v4();
+
+        let mut info = self.info.clone();
+
+        if let Some(id) = parsed_query.id() {
+            info.initial_query_id = id;
+        } 
+
         self.output
             .send_query(Query {
-                id: &id.to_string(),
-                info: ClientInfo {
-                    kind: QueryKind::InitialQuery,
-                    initial_user: "",
-                    initial_query_id: "",
-                    initial_address: "0.0.0.0:0",
-                    os_user: "",
-                    client_hostname: "localhost",
-                    client_name: "ClickHouseclient",
-                    client_version_major: crate::VERSION_MAJOR,
-                    client_version_minor: crate::VERSION_MINOR,
-                    client_tcp_protocol_version: protocol::DBMS_TCP_PROTOCOL_VERSION,
-                    quota_key: "",
-                    distributed_depth: 1,
-                    client_version_patch: 1,
-                    open_telemetry: None,
-                },
+                id:&query_id.to_string(),
+                info,
                 stage: QueryProcessingStage::Complete,
                 compression: CompressionMethod::default(),
                 query: &query,
@@ -436,7 +455,7 @@ pub async fn connect<A: ToSocketAddrs>(
     let stream = TcpStream::connect(destination).await?;
     stream.set_nodelay(options.tcp_nodelay)?;
     let (read, writer) = stream.into_split();
-    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options).await?;
+    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, DEFAULT_CLIENT_INFO).await?;
     Ok(result)
 }
 
@@ -456,7 +475,7 @@ pub async fn connect_tls<A: ToSocketAddrs>(
     stream.set_nodelay(options.tcp_nodelay)?;
     let tls_stream = connector.connect(name, stream).await?;
     let (read, writer) = tokio::io::split(tls_stream);
-    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options).await?;
+    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, DEFAULT_CLIENT_INFO).await?;
     Ok(result)
 }
 
