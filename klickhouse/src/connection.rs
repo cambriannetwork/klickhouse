@@ -25,11 +25,32 @@ use crate::{
 // Maximum number of progress statuses to keep in memory. New statuses evict old ones.
 const PROGRESS_CAPACITY: usize = 100;
 
+// Default client info used for connections that do not specify their own.
+pub const DEFAULT_CLIENT_INFO: ClientInfo<'static> = ClientInfo {
+                    kind: QueryKind::InitialQuery,
+                    initial_user: "",
+                    initial_query_id: "",
+                    initial_address: "0.0.0.0:0",
+                    os_user: "",
+                    client_hostname: "localhost",
+                    client_name: "ClickHouseclient",
+                    client_version_major: crate::VERSION_MAJOR,
+                    client_version_minor: crate::VERSION_MINOR,
+                    client_tcp_protocol_version: protocol::DBMS_TCP_PROTOCOL_VERSION,
+                    quota_key: "",
+                    distributed_depth: 1,
+                    client_version_patch: 1,
+                    open_telemetry: None,
+                };
+
+
 pub struct Connection<R: ClickhouseRead, W: ClickhouseWrite> {
     input: InternalClientIn<R>,
     output: InternalClientOut<W>,
     progress: broadcast::Sender<Progress>,
+    info: ClientInfo<'static>,
 }
+
 
 
 /// This is lightweight connection to Clickhouse.
@@ -37,7 +58,7 @@ pub struct Connection<R: ClickhouseRead, W: ClickhouseWrite> {
 /// It is used to send queries and receive responses.
 impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
-    async fn new(reader: R, writer: W, options: ClientOptions) -> Result<Self> {
+    async fn new(reader: R, writer: W, options: ClientOptions, info:ClientInfo<'static>) -> Result<Self> {
         let mut input = InternalClientIn::new(reader);
         let mut output = InternalClientOut::new(writer);
         
@@ -55,6 +76,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
             input,
             output,
             progress: broadcast::channel(PROGRESS_CAPACITY).0,
+            info,
         })
     }
 
@@ -81,27 +103,19 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
     
     async fn send_query(&mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<()> {
-        let query = query.try_into()?.0.trim().to_string();
-        let id = Uuid::new_v4();
+        let parsed_query:ParsedQuery = query.try_into()?;
+        let query = parsed_query.query.trim().to_string();
+       
+
+        let mut query_id = &Uuid::new_v4().to_string();
+        if let Some(id) = parsed_query.id() {
+            query_id = id;
+        } 
+
         self.output
             .send_query(Query {
-                id: &id.to_string(),
-                info: ClientInfo {
-                    kind: QueryKind::InitialQuery,
-                    initial_user: "",
-                    initial_query_id: "",
-                    initial_address: "0.0.0.0:0",
-                    os_user: "",
-                    client_hostname: "localhost",
-                    client_name: "ClickHouseclient",
-                    client_version_major: crate::VERSION_MAJOR,
-                    client_version_minor: crate::VERSION_MINOR,
-                    client_tcp_protocol_version: protocol::DBMS_TCP_PROTOCOL_VERSION,
-                    quota_key: "",
-                    distributed_depth: 1,
-                    client_version_patch: 1,
-                    open_telemetry: None,
-                },
+                id:query_id,
+                info:self.info.clone(),
                 stage: QueryProcessingStage::Complete,
                 compression: CompressionMethod::default(),
                 query: &query,
@@ -167,9 +181,19 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
 
     /// Sends a query string over native protocol and returns a stream of blocks.
-    /// The stream will contain blocks with rows.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` - A query string or a (id,query) string tuple or a [`ParsedQuery`].
+    /// 
+    /// # Returns
+    /// 
+    /// A stream of blocks received from Clickhouse.
+    /// 
+    /// # Remarks
+    /// 
     /// You probably want [`Connection::query`].
-    /// **Note**: This function will return a stream without 'Unpin' bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
+    /// This function will return a stream without 'Unpin' bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
     pub async fn query_raw<'a>(&'a mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<impl Stream<Item = Result<Block>> + Send  + 'a> {
         self.send_query(query).await?;
         self.receive_blocks().map(|stream| ::tokio_stream::StreamExt::filter(stream, | response | match response {
@@ -179,6 +203,18 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
 
     /// Sends a query string with streaming associated data (i.e. insert) over native protocol.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`]. The query should be a native query, i.e. it should have a [`format native`](https://clickhouse.com/docs/integrations/data-formats/binary-native) suffix.
+    /// * `blocks` - A stream of native blocks to send to Clickhouse. 
+    /// 
+    /// # Returns
+    /// 
+    /// A result indicating success or failure of the operation.
+    /// 
+    /// # Remarks
+    ///  
     /// Once all outgoing blocks are written (EOF of `blocks` stream), then any response blocks from Clickhouse are read and DISCARDED.
     /// You probably want [`Connection::insert`].
     pub async fn insert_raw(
@@ -201,8 +237,19 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
    
     /// Sends a query string with streaming associated data (i.e. insert) over native protocol.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`]. The query should be a native query, i.e. it should have a [`format native`](https://clickhouse.com/docs/integrations/data-formats/binary-native) suffix.
+    /// * `blocks` - A stream of blocks to send to Clickhouse. Each block should contain rows that implement the [`Row`] trait.
+    /// 
+    /// # Returns
+    /// 
+    /// A result indicating success or failure of the operation.
+    /// 
+    /// # Remarks
+    /// 
     /// Once all outgoing blocks are written (EOF of `blocks` stream), then any response blocks from Clickhouse are read and DISCARDED.
-    /// Make sure any query you send native data with has a [`format native`](https://clickhouse.com/docs/integrations/data-formats/binary-native) suffix.
     pub async fn insert<T: Row + Send + Sync + 'static>(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -261,8 +308,19 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
 
     /// Runs a query against Clickhouse, returning a stream of deserialized rows.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`].
+    /// 
+    /// # Returns
+    /// 
+    /// A stream of rows deserialized into the type `T` that implements the [`Row`] trait.
+    /// 
+    /// # Remarks
+    /// 
     /// Note that no rows are returned until Clickhouse sends a full block (but it usually sends more than one block).
-    /// **Note**: This function will return a stream without `Unpin` bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
+    /// This function will return a stream without `Unpin` bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
     pub async fn query<'a,T: Row + Send + 'a>(
         &'a mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -302,6 +360,15 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
 
     /// Same as [`Connection::insert`], but inserts a single batch of rows instead of a stream.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`]. The query should be a native query, i.e. it should have a [`format native`](https://clickhouse.com/docs/integrations/data-formats/binary-native) suffix.
+    /// * `rows` - A vector of rows to insert into Clickhouse. Each row should implement the [`Row`] trait.
+    /// 
+    /// # Returns
+    /// 
+    /// A result indicating success or failure of the operation.
     pub async fn insert_vec<T: Row + Send + Sync + 'static>(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -357,6 +424,14 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
 
     /// Same as [`Connection::query`], but collects all rows into a `Vec`
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`].
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of rows deserialized into the type `T` that implements the [`Row`] trait.
     pub async fn query_vec<'a, T: Row + Send + 'a>(
         &'a mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -376,7 +451,15 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
     }
 
-    /// Same as [`Connection::query`], but returns the first row, if any, and discards the rest.
+    /// Same as [`Connection::query`], but returns the first row, and discards the rest.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`].
+    /// 
+    /// # Returns
+    /// 
+    /// An optional row deserialized into the type `T` that implements the [`Row`] trait.
     pub async fn query_first<'a, T: Row + Send + 'a>(
         &'a mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -390,7 +473,15 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         stream.next().await.transpose()
     }
 
-    /// Same as [`Connection::query`], but returns the first value of the first row, if any, and discards the rest.
+    /// Same as [`Connection::query`], but returns the first row, and discards the rest.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `query` -  A query string or a (id,query) string tuple or a [`ParsedQuery`].
+    /// 
+    /// # Returns
+    /// 
+    /// An optional tuple of (key, type, value) where key is the first column name, type is the type of the first column, and value is the value of the first column.
     pub async fn execute(
         &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
@@ -398,22 +489,22 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
         self.send_query(query).await?;
 
-        let mut result = None;
 
-        while let Some(Ok(mut block)) = self.receive_block().await {
-            if let Some(row) = block.take_iter_rows().next() {
-                if let Some((key, ty, value)) = row.into_iter().next() {
-                    result = Some((key.to_owned(), ty.clone(), value));
-                    break;
+
+         loop {
+            if let Some(block_result) = self.receive_block().await {
+                let mut block = block_result?;
+                if let Some(row) = block.take_iter_rows().next() {
+                    if let Some((key, ty, value)) = row.into_iter().next() {
+                        self.discard_blocks().await?;
+                        break Ok(Some((key.to_owned(), ty.clone(), value)));
+                    }
                 }
             }
+            else {
+                break Ok(None);
+            }
         }
-       
-        if result.is_some() {
-            self.discard_blocks().await?;
-        }
-
-        Ok(result)
     }
 
     /// Receive progress on the queries as they execute.
@@ -428,18 +519,47 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
 pub type TcpConnection = Connection<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>>;
 
-/// Connects to a spesific socket address for Clickhouse.
-pub async fn connect<A: ToSocketAddrs>(
+/// Connects to a spesific socket address for Clickhouse with additional client info.
+/// 
+/// # Arguments
+/// 
+/// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
+/// * `options` - Client options to use for the connection, such as default database, username, password, etc.
+/// * `info` - Client info to use for the connection, such as query kind, initial user, initial query ID, etc.
+/// 
+/// # Returns
+/// 
+/// A result containing a [`TcpConnection`] if successful, or an error if the connection fails.
+pub async fn connect_with_info<A: ToSocketAddrs>(
     destination: A, 
     options: ClientOptions,
+    info: ClientInfo<'static>,
 ) -> Result<TcpConnection>  {
     let stream = TcpStream::connect(destination).await?;
     stream.set_nodelay(options.tcp_nodelay)?;
     let (read, writer) = stream.into_split();
-    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options).await?;
+    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, info).await?;
     Ok(result)
 }
 
+
+
+/// Connects to a spesific socket address for Clickhouse.
+/// 
+/// # Arguments
+/// 
+/// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
+/// * `options` - Client options to use for the connection, such as default database, username, password, etc.
+/// 
+/// # Returns
+/// 
+/// A result containing a [`TcpConnection`] if successful, or an error if the connection fails.
+pub async fn connect<A: ToSocketAddrs>(
+    destination: A, 
+    options: ClientOptions,
+) -> Result<TcpConnection>  {
+    connect_with_info(destination, options, DEFAULT_CLIENT_INFO).await
+}
 
 #[cfg(feature = "tls")]
 pub type TlsConnection = Connection<BufReader<tokio::io::ReadHalf<::tokio_rustls::client::TlsStream<TcpStream>>>, BufWriter<tokio::io::WriteHalf<::tokio_rustls::client::TlsStream<TcpStream>>>>;
@@ -456,7 +576,7 @@ pub async fn connect_tls<A: ToSocketAddrs>(
     stream.set_nodelay(options.tcp_nodelay)?;
     let tls_stream = connector.connect(name, stream).await?;
     let (read, writer) = tokio::io::split(tls_stream);
-    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options).await?;
+    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, DEFAULT_CLIENT_INFO).await?;
     Ok(result)
 }
 

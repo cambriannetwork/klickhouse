@@ -218,7 +218,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             self.withs.reverse();
             while let Some(last) = self.withs.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 if !self.withs.is_empty() {
                     out.push(',');
                 }
@@ -235,7 +235,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             self.distinct_on.reverse();
             while let Some(last) = self.distinct_on.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 if !self.distinct_on.is_empty() {
                     out.push(',');
                 }
@@ -246,7 +246,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
         self.exprs.reverse();
         while let Some(last) = self.exprs.pop() {
             let last = last?;
-            out.push_str(&last.0);
+            out.push_str(&last.query);
             if !self.exprs.is_empty() {
                 out.push_str(",\n");
             } else {
@@ -255,11 +255,11 @@ impl TryInto<ParsedQuery> for SelectBuilder {
         }
 
         out.push_str("FROM ");
-        out.push_str(&self.from?.0);
+        out.push_str(&self.from?.query);
         out.push('\n');
         if let Some(sample) = self.sample {
             out.push_str("SAMPLE ");
-            out.push_str(&sample?.0);
+            out.push_str(&sample?.query);
             out.push('\n');
         }
 
@@ -267,7 +267,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             self.array_joins.reverse();
             while let Some(last) = self.array_joins.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 out.push('\n');
             }
         }
@@ -276,7 +276,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             self.joins.reverse();
             while let Some(last) = self.joins.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 out.push('\n');
             }
         }
@@ -286,7 +286,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             out.push_str("PREWHERE (");
             while let Some(last) = self.prewhere.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 if !self.prewhere.is_empty() {
                     out.push_str(") AND\n(");
                 } else {
@@ -300,7 +300,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             out.push_str("WHERE (");
             while let Some(last) = self.where_.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 if !self.where_.is_empty() {
                     out.push_str(") AND\n(");
                 } else {
@@ -314,7 +314,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             out.push_str("GROUP BY ");
             while let Some(last) = self.group_by.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 if !self.group_by.is_empty() {
                     out.push_str(",\n");
                 } else {
@@ -328,7 +328,7 @@ impl TryInto<ParsedQuery> for SelectBuilder {
             out.push_str("HAVING (");
             while let Some(last) = self.having.pop() {
                 let last = last?;
-                out.push_str(&last.0);
+                out.push_str(&last.query);
                 if !self.having.is_empty() {
                     out.push_str(") AND\n(");
                 } else {
@@ -339,35 +339,35 @@ impl TryInto<ParsedQuery> for SelectBuilder {
 
         if let Some(order_by) = self.order_by {
             out.push_str("ORDER BY ");
-            out.push_str(&order_by?.0);
+            out.push_str(&order_by?.query);
             out.push('\n');
         }
 
         if let Some(limit) = self.limit {
             out.push_str("LIMIT ");
-            out.push_str(&limit?.0);
+            out.push_str(&limit?.query);
             out.push('\n');
         }
 
         if let Some(offset) = self.offset {
             out.push_str("OFFSET ");
-            out.push_str(&offset?.0);
+            out.push_str(&offset?.query);
             out.push('\n');
         }
 
         if let Some(settings) = self.settings {
             out.push_str("SETTINGS ");
-            out.push_str(&settings?.0);
+            out.push_str(&settings?.query);
             out.push('\n');
         }
 
         if let Some(union) = self.union {
             out.push_str("UNION ");
-            out.push_str(&union?.0);
+            out.push_str(&union?.query);
             out.push('\n');
         }
 
-        Ok(ParsedQuery(out))
+        Ok(ParsedQuery::new(out))
     }
 }
 

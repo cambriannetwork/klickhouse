@@ -3,6 +3,7 @@ use klickhouse::connection::TcpConnection;
 use klickhouse::{connection::connect, ClientOptions};
 use klickhouse::{DateTime, Progress, Row, Type, Value};
 use tokio::select;
+use uuid::Uuid;
 
 async fn get_connection() -> TcpConnection {
     connect("localhost:9000", ClientOptions{
@@ -46,7 +47,6 @@ pub struct TestType2 {
 }
 
 const SQL:&str = "SELECT t.generate_series as s,'keeper' as n FROM generate_series(1, 39332) as t";
-
 
 /// Test that the connection can be established and the ping-pong works.
 #[tokio::test]
@@ -147,7 +147,7 @@ async fn test_multi_insert() {
     let mut conn = get_connection().await;
 
     prepare_table(
-        "test_insert_rows",
+        "test_multi_insert_rows",
         r"
         s UInt64,
         n String",
@@ -156,7 +156,7 @@ async fn test_multi_insert() {
     .await;
 
     prepare_table(
-        "test_insert_rows2",
+        "test_multi_insert_rows_2",
         r"
         s UInt64,
         d DateTime,
@@ -168,12 +168,12 @@ async fn test_multi_insert() {
 
     let data:Vec<TestType> = (0..1000000).map(|i| TestType { s: i, n: "keeper".to_string() }).collect();
 
-    conn.insert_vec("INSERT INTO test_insert_rows FORMAT Native", data).await.unwrap();
+    conn.insert_vec("INSERT INTO test_multi_insert_rows FORMAT Native", data).await.unwrap();
 
 
     let data:Vec<TestType2> = (0..1000000).map(|i| TestType2 { s: i, d: DateTime::try_from(chrono::Utc::now()).unwrap(), n: "keeper".to_string() }).collect();
 
-    conn.insert_vec("INSERT INTO test_insert_rows2 FORMAT Native", data).await.unwrap();
+    conn.insert_vec("INSERT INTO test_multi_insert_rows_2 FORMAT Native", data).await.unwrap();
 
 }
 
@@ -186,7 +186,7 @@ async fn test_progress() {
     let mut conn = get_connection().await;
 
     prepare_table(
-        "test_insert_rows",
+        "test_progress",
         r"
         s UInt64,
         n String",
@@ -199,7 +199,7 @@ async fn test_progress() {
     select!(
         () = async {
             let data:Vec<TestType> = (0..1000000).map(|i| TestType { s: i, n: "keeper".to_string() }).collect();
-            conn.insert_vec("INSERT INTO test_insert_rows FORMAT Native", data).await.unwrap();
+            conn.insert_vec("INSERT INTO test_progress FORMAT Native", data).await.unwrap();
         
         } => {},
         () = async {
@@ -220,4 +220,34 @@ async fn test_progress() {
         } => {},
     )
 
+}
+
+/// Test that we can execute a query with a query ID and check if it is logged in the system.query_log
+/// This test is useful to ensure that the query ID functionality works as expected.
+#[tokio::test]
+async fn test_query_id() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+    
+        // Execution
+
+        let mut conn = get_connection().await;
+
+        let id = Uuid::new_v4().to_string();
+
+        // Enable query logging
+        conn.execute("SET log_queries=1").await.unwrap();
+
+        let _ = conn.execute((&id,SQL)).await.unwrap();
+
+        // Wait for the query to be logged
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+        let query = format!("SELECT 1 FROM system.query_log WHERE initial_query_id = '{}'", id);
+    
+        let log = conn.execute(query).await.unwrap();
+
+        assert!(log.is_some(), "Query ID not found in system.query_log");
+    
 }
