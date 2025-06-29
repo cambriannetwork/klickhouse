@@ -6,12 +6,26 @@ use tokio::select;
 use uuid::Uuid;
 
 async fn get_connection() -> TcpConnection {
-    connect("localhost:9000", ClientOptions{
-        username: "default".to_string(),
-        password: "default".to_string(),
-        default_database: "dev_mainnet".to_string(),
-        tcp_nodelay: true,
-    }).await.unwrap()
+
+    let mut options = ClientOptions::default();
+
+    options.tcp_nodelay = true;
+
+    if let Ok(user) = std::env::var("KLICKHOUSE_TEST_USER") {
+        options.username = user;
+    }
+
+    if let Ok(password) = std::env::var("KLICKHOUSE_TEST_PASSWORD") {
+        options.password = password;
+    }
+
+    if let Ok(database) = std::env::var("KLICKHOUSE_TEST_DATABASE") {
+        options.default_database = database;
+    }
+
+    let address = std::env::var("KLICKHOUSE_TEST_ADDR").unwrap_or_else(|_| "127.0.0.1:9000".into());
+
+    connect(address, options).await.unwrap()
 }
 
 /// Drop the table if it exists, and create it with the given structure.
