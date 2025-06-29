@@ -19,13 +19,22 @@ async fn get_connection() -> TcpConnection {
         options.password = password;
     }
 
-    if let Ok(database) = std::env::var("KLICKHOUSE_TEST_DATABASE") {
-        options.default_database = database;
-    }
-
     let address = std::env::var("KLICKHOUSE_TEST_ADDR").unwrap_or_else(|_| "127.0.0.1:9000".into());
 
-    connect(address, options).await.unwrap()
+    let mut connection = connect(address, options).await.unwrap();
+
+    let database = std::env::var("KLICKHOUSE_TEST_DATABASE").unwrap_or_else(|_| "klickhouse_test".into());
+
+    connection.execute(format!("CREATE DATABASE IF NOT EXISTS {database}"))
+        .await
+        .unwrap();
+
+    connection.execute(format!("USE {database}"))
+        .await
+        .unwrap();
+        
+    connection
+
 }
 
 /// Drop the table if it exists, and create it with the given structure.
