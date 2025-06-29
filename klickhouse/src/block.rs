@@ -42,8 +42,7 @@ impl BlockInfo {
                 }
                 field_num => {
                     return Err(KlickhouseError::ProtocolError(format!(
-                        "unknown block info field number: {}",
-                        field_num
+                        "unknown block info field number: {field_num}"
                     )));
                 }
             }
@@ -177,7 +176,7 @@ impl Block {
         }
     }
 
-    pub(crate) async fn read<R: ClickhouseRead>(reader: &mut R, revision: u64) -> Result<Self> {
+    pub async fn read<R: ClickhouseRead>(reader: &mut R, revision: u64) -> Result<Self> {
         let info = if revision > 0 {
             BlockInfo::read(reader).await?
         } else {
@@ -211,11 +210,7 @@ impl Block {
         Ok(block)
     }
 
-    pub(crate) async fn write<W: ClickhouseWrite>(
-        mut self,
-        writer: &mut W,
-        revision: u64,
-    ) -> Result<()> {
+    pub async fn write<W: ClickhouseWrite>(mut self, writer: &mut W, revision: u64) -> Result<()> {
         if revision > 0 {
             self.info.write(writer).await?;
         }
