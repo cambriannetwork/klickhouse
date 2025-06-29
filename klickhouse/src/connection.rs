@@ -465,12 +465,20 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
     ) -> Result<Option<T>> {
 
-        let stream =  self.query::<T>(query)
-        .await?;
+        let result =  {
+            
+            let stream =  self.query::<T>(query).await?;
         
-        pin_mut!(stream);
+            pin_mut!(stream);
+            
+            stream.next().await.transpose()
 
-        stream.next().await.transpose()
+        };
+
+        self.discard_blocks().await?;
+
+        result
+
     }
 
     /// Same as [`Connection::query`], but returns the first row, and discards the rest.
