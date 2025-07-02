@@ -109,6 +109,41 @@ async fn test_select_blocks() {
 
 }
 
+/// Test that we can recieve the first block from the server and discard the rest.
+#[tokio::test]
+async fn test_select_first() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
+    let mut conn = get_connection().await;
+
+    let result: Option<TestType> = conn.query_first(SQL).await.unwrap();
+    assert!(result.is_some());
+
+    let first = result.unwrap();
+
+    assert_eq!(first.s, 1);
+    assert_eq!(first.n, "keeper");
+
+}
+
+/// Test that we can recieve the first block from the server and discard the rest.
+#[tokio::test]
+async fn test_select_first_none() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
+    let mut conn = get_connection().await;
+
+    let query = format!("{} WHERE s = 39333", SQL);
+
+    let result: Option<TestType> = conn.query_first(query).await.unwrap();
+    assert!(result.is_none());
+}
+
+
 /// Test that we can recieve rows (typed values) from the server
 #[tokio::test]
 async fn test_select_rows() {
