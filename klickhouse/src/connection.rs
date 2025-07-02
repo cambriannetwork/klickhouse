@@ -475,7 +475,13 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
         };
 
-        self.discard_blocks().await?;
+        if let Ok(Some(_)) = &result {
+            // If we got a result, we need to discard the rest of the blocks
+            // to avoid memory leaks.
+            // This is because Clickhouse will send more blocks than we requested.
+            // We don't care about the rest of the blocks, so we just discard them.
+            self.discard_blocks().await?;
+        }
 
         result
 
