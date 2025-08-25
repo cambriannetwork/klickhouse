@@ -14,13 +14,14 @@ use uuid::Uuid;
 
 use crate::{
     block::{Block, BlockInfo}, internal_client_in::InternalClientIn, internal_client_out::{
-        ClientHello, 
-        ClientInfo, 
+        ClientHello,  
         InternalClientOut, 
         Query, QueryKind, 
         QueryProcessingStage
     }, io::{ClickhouseRead, ClickhouseWrite}, protocol::{self, CompressionMethod, ServerPacket}, ClientOptions, KlickhouseError, ParsedQuery, Progress, Result, Row, Type, Value
 };
+
+pub use crate::internal_client_out::ClientInfo;
 
 // Maximum number of progress statuses to keep in memory. New statuses evict old ones.
 const PROGRESS_CAPACITY: usize = 100;
@@ -533,64 +534,108 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
 pub type TcpConnection = Connection<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>>;
 
-/// Connects to a spesific socket address for Clickhouse with additional client info.
-/// 
-/// # Arguments
-/// 
-/// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
-/// * `options` - Client options to use for the connection, such as default database, username, password, etc.
-/// * `info` - Client info to use for the connection, such as query kind, initial user, initial query ID, etc.
-/// 
-/// # Returns
-/// 
-/// A result containing a [`TcpConnection`] if successful, or an error if the connection fails.
-pub async fn connect_with_info<A: ToSocketAddrs>(
-    destination: A, 
-    options: ClientOptions,
-    info: ClientInfo<'static>,
-) -> Result<TcpConnection>  {
-    let stream = TcpStream::connect(destination).await?;
-    stream.set_nodelay(options.tcp_nodelay)?;
-    let (read, writer) = stream.into_split();
-    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, info).await?;
-    Ok(result)
+impl TcpConnection {
+   /// Connects to a spesific socket address for Clickhouse with additional client info.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
+    /// * `options` - Client options to use for the connection, such as default database, username, password, etc.
+    /// * `info` - Client info to use for the connection, such as query kind, initial user, initial query ID, etc.
+    /// 
+    /// # Returns
+    /// 
+    /// A result containing a [`TcpConnection`] if successful, or an error if the connection fails.
+    pub async fn connect_with_info<A: ToSocketAddrs>(
+        destination: A, 
+        options: ClientOptions,
+        info: ClientInfo<'static>,
+    ) -> Result<Self>  {
+        let stream = TcpStream::connect(destination).await?;
+        stream.set_nodelay(options.tcp_nodelay)?;
+        let (read, writer) = stream.into_split();
+        let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, info).await?;
+        Ok(result)
+    }
+
+    /// Connects to a spesific socket address for Clickhouse.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
+    /// * `options` - Client options to use for the connection, such as default database, username, password, etc.
+    /// 
+    /// # Returns
+    /// 
+    /// A result containing a [`TcpConnection`] if successful, or an error if the connection fails.
+    pub async fn connect<A: ToSocketAddrs>(
+        destination: A, 
+        options: ClientOptions,
+    ) -> Result<Self>  {
+        Self::connect_with_info(destination, options, DEFAULT_CLIENT_INFO).await
+    }
+
 }
 
-
-
-/// Connects to a spesific socket address for Clickhouse.
-/// 
-/// # Arguments
-/// 
-/// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
-/// * `options` - Client options to use for the connection, such as default database, username, password, etc.
-/// 
-/// # Returns
-/// 
-/// A result containing a [`TcpConnection`] if successful, or an error if the connection fails.
-pub async fn connect<A: ToSocketAddrs>(
-    destination: A, 
-    options: ClientOptions,
-) -> Result<TcpConnection>  {
-    connect_with_info(destination, options, DEFAULT_CLIENT_INFO).await
-}
-
-#[cfg(feature = "tls")]
-pub type TlsConnection = Connection<BufReader<tokio::io::ReadHalf<::tokio_rustls::client::TlsStream<TcpStream>>>, BufWriter<tokio::io::WriteHalf<::tokio_rustls::client::TlsStream<TcpStream>>>>;
 
 /// Connects to a specific socket address over TLS (rustls) for Clickhouse.
 #[cfg(feature = "tls")]
-pub async fn connect_tls<A: ToSocketAddrs>(
-    destination: A,
-    options: ClientOptions,
-    name: rustls_pki_types::ServerName<'static>,
-    connector: &tokio_rustls::TlsConnector,
-) ->  Result<TlsConnection> {
-    let stream = TcpStream::connect(destination).await?;
-    stream.set_nodelay(options.tcp_nodelay)?;
-    let tls_stream = connector.connect(name, stream).await?;
-    let (read, writer) = tokio::io::split(tls_stream);
-    let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, DEFAULT_CLIENT_INFO).await?;
-    Ok(result)
+pub type TlsConnection = Connection<BufReader<tokio::io::ReadHalf<::tokio_rustls::client::TlsStream<TcpStream>>>, BufWriter<tokio::io::WriteHalf<::tokio_rustls::client::TlsStream<TcpStream>>>>;
+
+#[cfg(feature = "tls")]
+impl TlsConnection {
+
+    /// Connects to a spesific socket address for Clickhouse over TLS with additional client info.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `destination` - A socket address to connect to, can be a string or a tuple of (host, port).
+    /// * `options` - Client options to use for the connection, such as default database, username, password, etc.
+    /// * `name` - The server name for TLS verification.
+    /// * `connector` - A reference to a `tokio_rustls::TlsConnector` to use for the TLS connection.
+    /// * `info` - Client info to use for the connection, such as query kind, initial user, initial query ID, etc.
+    /// 
+    /// # Returns
+    /// 
+    /// A result containing a [`TlsConnection`] if successful, or an error if the connection fails.
+    pub async fn connect_with_info<A: ToSocketAddrs>(
+        destination: A,
+        options: ClientOptions,
+        name: rustls_pki_types::ServerName<'static>,
+        connector: &tokio_rustls::TlsConnector,
+        info: ClientInfo<'static>,
+    ) ->  Result<Self> {
+        let stream = TcpStream::connect(destination).await?;
+        stream.set_nodelay(options.tcp_nodelay)?;
+        let tls_stream = connector.connect(name, stream).await?;
+        let (read, writer) = tokio::io::split(tls_stream);
+        let result = Connection::new(BufReader::new(read), BufWriter::new(writer), options, info).await?;
+        Ok(result)
+    }
+
+    /// Connects to a spesific socket address for Clickhouse over TLS.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `destination` - A socket address to connect to, can be a string or
+    /// a tuple of (host, port).
+    /// * `options` - Client options to use for the connection, such as default database
+    /// username, password, etc.
+    /// * `name` - The server name for TLS verification.
+    /// * `connector` - A reference to a `tokio_rustls::TlsConnector` to use for the TLS connection.
+    /// 
+    /// # Returns
+    /// 
+    /// A result containing a [`TlsConnection`] if successful, or an error if the connection fails.
+    pub async fn connect<A: ToSocketAddrs>(
+        destination: A,
+        options: ClientOptions,
+        name: rustls_pki_types::ServerName<'static>,
+        connector: &tokio_rustls::TlsConnector,
+    ) ->  Result<Self> {
+        Self::connect_with_info(destination, options, name, connector, DEFAULT_CLIENT_INFO).await
+    }
+
 }
+
 

@@ -11,7 +11,7 @@ mod client;
 mod compression;
 mod convert;
 #[cfg(feature = "connection")]
-pub mod connection;
+mod connection;
 /// Error generator functions used by `klickhouse_derive`
 mod errors;
 mod internal_client_in;
@@ -37,9 +37,11 @@ pub use bb8;
 #[cfg(feature = "bb8")]
 pub use manager::ClientManager;
 #[cfg(all(feature = "connection",feature = "bb8"))]
-pub use manager::ConnectionManager;
+pub use manager::TcpConnectionManager;
 #[cfg(all(feature = "connection",feature = "tls",feature = "bb8"))]
 pub use manager::TlsConnectionManager;
+
+
 
 
 pub use uuid::Uuid;
@@ -81,3 +83,8 @@ pub use types::{Type, Tz};
 pub use values::*;
 mod lock;
 pub use lock::ClickhouseLock;
+
+#[cfg(feature = "connection")]
+pub use connection::TcpConnection;
+#[cfg(all(feature = "connection",feature = "tls"))]
+pub use connection::TlsConnection;
