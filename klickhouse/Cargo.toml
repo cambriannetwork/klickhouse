@@ -19,8 +19,12 @@ name = "test"
 path = "tests/main.rs"
 
 [[example]]
-name = "pool"
+name = "client_pool"
 required-features = ["bb8"]
+
+[[example]]
+name = "connection_pool"
+required-features = ["bb8", "connection"]
 
 [dependencies]
 tokio = { version = "1.45", features = ["io-util", "net", "rt", "macros"] }

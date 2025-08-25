@@ -5,11 +5,8 @@ use klickhouse::{DateTime, Progress, Row, Type, Value};
 use tokio::select;
 use uuid::Uuid;
 
-async fn get_connection() -> TcpConnection {
-
+async fn get_connection_info() -> (String, ClientOptions) {
     let mut options = ClientOptions::default();
-
-    options.tcp_nodelay = true;
 
     if let Ok(user) = std::env::var("KLICKHOUSE_TEST_USER") {
         options.username = user;
@@ -20,6 +17,13 @@ async fn get_connection() -> TcpConnection {
     }
 
     let address = std::env::var("KLICKHOUSE_TEST_ADDR").unwrap_or_else(|_| "127.0.0.1:9000".into());
+
+    (address, options)
+}
+
+async fn get_connection() -> TcpConnection {
+
+    let (address, options) = get_connection_info().await;
 
     let mut connection = connect(address, options).await.unwrap();
 
@@ -308,4 +312,102 @@ async fn test_query_id() {
 
         assert!(log.is_some(), "Query ID not found in system.query_log");
     
+}
+
+#[cfg(feature = "bb8")]
+mod pool_tests {
+    use super::*;
+    use klickhouse::ConnectionManager;
+
+    #[derive(Row, Debug, PartialEq, Clone)]
+    struct TestData {
+        id: u32,
+        name: String,
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connection_pooling() {
+
+        let (destination, options) = get_connection_info().await;
+
+        // Create TcpConnectionManager
+        let manager = ConnectionManager::new(destination, options)
+            .await
+            .expect("Failed to create TcpConnectionManager");
+
+        // Create pool
+        let pool = bb8::Pool::builder()
+            .max_size(2)
+            .build(manager)
+            .await
+            .expect("Failed to create pool");
+
+        // Test basic connection from pool
+        {
+            let mut conn = pool.get().await.expect("Failed to get connection from pool");
+            
+            // Test ping
+            conn.ping_pong().await.expect("Ping failed");
+            
+            // Test basic query
+            conn.execute("SELECT 1").await.expect("Basic query failed");
+        }
+
+        // Test connection reuse
+        {
+            let mut conn1 = pool.get().await.expect("Failed to get first connection");
+            let table_name = "tcp_pool_test_table";
+            
+            // Set up test table
+            prepare_table(table_name, "id UInt32, name String", &mut conn1).await;
+            
+            // Insert test data
+            let test_data = vec![
+                TestData { id: 1, name: "Test1".to_string() },
+                TestData { id: 2, name: "Test2".to_string() },
+            ];
+            
+            conn1.insert_vec(
+                format!("INSERT INTO {table_name} FORMAT native"),
+                test_data.clone()
+            ).await.expect("Failed to insert data");
+            
+            drop(conn1); // Return to pool
+            
+            // Get another connection and verify data
+            let mut conn2 = pool.get().await.expect("Failed to get second connection");
+            let results: Vec<TestData> = conn2.query_vec(
+                format!("SELECT id, name FROM {table_name} ORDER BY id")
+            ).await.expect("Failed to query data");
+            
+            assert_eq!(results, test_data);
+            
+            // Clean up
+            conn2.execute(format!("DROP TABLE {table_name}"))
+                .await.expect("Failed to drop table");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connection_manager_with_prequel() {
+        let (destination, options) = get_connection_info().await;
+        
+        // Create manager with prequel
+        let manager = ConnectionManager::new(destination, options)
+            .await
+            .expect("Failed to create TcpConnectionManager")
+            .with_prequel("USE klickhouse_test");
+
+        let pool = bb8::Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .await
+            .expect("Failed to create pool");
+
+        let mut conn = pool.get().await.expect("Failed to get connection from pool");
+        
+        // This should work without needing to specify the database
+        // since the prequel should have set it
+        conn.ping_pong().await.expect("Ping with prequel failed");
+    }
 }
