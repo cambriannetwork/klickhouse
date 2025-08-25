@@ -15,7 +15,7 @@ async fn main() {
         .init();
 
     // Create a TcpConnectionManager for raw connection pooling
-    let manager = ConnectionManager::new("127.0.0.1:9000", ClientOptions::default())
+    let manager = TcpConnectionManager::new("127.0.0.1:9000", ClientOptions::default(), None)
         .await
         .unwrap();
 

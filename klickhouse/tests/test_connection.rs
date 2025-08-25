@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
-use klickhouse::connection::TcpConnection;
-use klickhouse::{connection::connect, ClientOptions};
+use klickhouse::TcpConnection;
+use klickhouse::ClientOptions;
 use klickhouse::{DateTime, Progress, Row, Type, Value};
 use tokio::select;
 use uuid::Uuid;
@@ -25,7 +25,7 @@ async fn get_connection() -> TcpConnection {
 
     let (address, options) = get_connection_info().await;
 
-    let mut connection = connect(address, options).await.unwrap();
+    let mut connection = TcpConnection::connect(address, options).await.unwrap();
 
     let database = std::env::var("KLICKHOUSE_TEST_DATABASE").unwrap_or_else(|_| "klickhouse_test".into());
 
@@ -317,7 +317,7 @@ async fn test_query_id() {
 #[cfg(feature = "bb8")]
 mod pool_tests {
     use super::*;
-    use klickhouse::ConnectionManager;
+    use klickhouse::TcpConnectionManager;
 
     #[derive(Row, Debug, PartialEq, Clone)]
     struct TestData {
@@ -331,7 +331,7 @@ mod pool_tests {
         let (destination, options) = get_connection_info().await;
 
         // Create TcpConnectionManager
-        let manager = ConnectionManager::new(destination, options)
+        let manager = TcpConnectionManager::new(destination, options,None)
             .await
             .expect("Failed to create TcpConnectionManager");
 
@@ -393,7 +393,7 @@ mod pool_tests {
         let (destination, options) = get_connection_info().await;
         
         // Create manager with prequel
-        let manager = ConnectionManager::new(destination, options)
+        let manager = TcpConnectionManager::new(destination, options,None)
             .await
             .expect("Failed to create TcpConnectionManager")
             .with_prequel("USE klickhouse_test");

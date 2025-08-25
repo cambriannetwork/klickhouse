@@ -30,10 +30,11 @@ $ cargo nextest run
 - `derive`: Enable [klickhouse_derive], providing a derive macro for the [Row] trait. Default.
 - `compression`: `lz4` compression for client/server communication. Default.
 - `serde`: Derivation of [serde::Serialize] and [serde::Deserialize] on various objects, and JSON support. Default.
-- `tls`: TLS support via [tokio-rustls](https://crates.io/crates/tokio-rustls).
+- `tls`: TLS support via [tokio-rustls](https://crates.io/crates/tokio-rustls). With `connection` enabled, enables raw TLS connection `TlsConnection` and a `TlsConnectionManager` managed by bb8.
 - `refinery`: Migrations via [refinery](https://crates.io/crates/refinery).
 - `geo-types`: Conversion of geo types to/from the [geo-types](https://crates.io/crates/geo-types) crate.
-- `bb8`: Enables a `ConnectionManager` managed by bb8
+- `bb8`: Enables a `ClientManager` managed by bb8
+- `conection`: Enables a raw `TcpConnection` and  `TcpConnectionManager` managed by bb8.
 
 ## Credit
 
