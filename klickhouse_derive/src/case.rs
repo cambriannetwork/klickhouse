@@ -93,7 +93,7 @@ pub struct ParseError<'a> {
     unknown: &'a str,
 }
 
-impl Display for ParseError<'_> {
+impl<'a> Display for ParseError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("unknown rename rule `rename_all = ")?;
         Debug::fmt(self.unknown, f)?;

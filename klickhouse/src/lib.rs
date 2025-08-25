@@ -35,7 +35,12 @@ pub use query::*;
 #[cfg(feature = "bb8")]
 pub use bb8;
 #[cfg(feature = "bb8")]
+pub use manager::ClientManager;
+#[cfg(all(feature = "connection",feature = "bb8"))]
 pub use manager::ConnectionManager;
+#[cfg(all(feature = "connection",feature = "tls",feature = "bb8"))]
+pub use manager::TlsConnectionManager;
+
 
 pub use uuid::Uuid;
 
