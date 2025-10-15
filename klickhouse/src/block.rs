@@ -183,7 +183,7 @@ impl Block {
         }
         if let Some((name,type_)) = self.column_types.swap_remove_index(0) {
             if let Some((_,mut values)) = self.column_data.swap_remove_index(0) {
-                if values.len() > 0 {
+                if !values.is_empty() {
                     return Some((name, type_, values.swap_remove(0)));
                 }
             }
