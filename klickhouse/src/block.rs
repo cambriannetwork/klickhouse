@@ -176,6 +176,21 @@ impl Block {
         }
     }
 
+    /// Consume the block and return the first value of the first column, if it exists.
+    pub fn into_first_value(mut self) -> Option<(String, Type, Value)> {
+        if self.rows == 0 {
+            return None;
+        }
+        if let Some((name,type_)) = self.column_types.swap_remove_index(0) {
+            if let Some((_,mut values)) = self.column_data.swap_remove_index(0) {
+                if values.len() > 0 {
+                    return Some((name, type_, values.swap_remove(0)));
+                }
+            }
+        }
+        None
+    }
+
     pub async fn read<R: ClickhouseRead>(reader: &mut R, revision: u64) -> Result<Self> {
         let info = if revision > 0 {
             BlockInfo::read(reader).await?

@@ -132,6 +132,26 @@ async fn test_select_first() {
 
 }
 
+/// Test that we can recieve the first value from the server and discard the rest.
+#[tokio::test]
+async fn test_execute() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
+    let mut conn = get_connection().await;
+
+    let result = conn.execute(SQL).await.unwrap();
+    assert!(result.is_some());
+
+    let (name,_type,value) = result.unwrap();
+
+    assert_eq!(name, "s");
+    assert_eq!(_type, Type::UInt64);
+    assert_eq!(value, Value::UInt64(1));
+}
+
+
 /// Test that we can recieve the first block from the server and discard the rest.
 #[tokio::test]
 async fn test_select_first_none() {
