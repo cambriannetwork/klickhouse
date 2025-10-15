@@ -159,7 +159,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     }
 
 
-    fn receive_blocks<'a>(&'a mut self) -> Result<impl Stream<Item = Result<Block>> + Send +  'a> {
+    fn receive_blocks(&mut self) -> Result<impl Stream<Item = Result<Block>> + Send + '_> {
         let stream = futures_util::stream::unfold(self, |this| async {
             match this.receive_block().await {
                 Some(Ok(block)) => Some((Ok(block), this)),
@@ -195,7 +195,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     /// 
     /// You probably want [`Connection::query`].
     /// This function will return a stream without 'Unpin' bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
-    pub async fn query_raw<'a>(&'a mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<impl Stream<Item = Result<Block>> + Send  + 'a> {
+    pub async fn query_raw(&mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<impl Stream<Item = Result<Block>> + Send + '_> {
         self.send_query(query).await?;
         self.receive_blocks()
     }
@@ -319,11 +319,11 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     /// 
     /// Note that no rows are returned until Clickhouse sends a full block (but it usually sends more than one block).
     /// This function will return a stream without `Unpin` bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
-    pub async fn query<'a,T: Row + Send + 'a>(
-        &'a mut self,
+    pub async fn query<T: Row + Send + 'static>(
+        &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
-    ) -> Result<impl Stream<Item = Result<T>> + Send  + 'a> {
-        
+    ) -> Result<impl Stream<Item = Result<T>> + Send + '_> {
+
         let stream = self.query_raw(query).await?;
 
         Ok(stream.flat_map(|b| match b {
@@ -430,8 +430,8 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     /// # Returns
     /// 
     /// A vector of rows deserialized into the type `T` that implements the [`Row`] trait.
-    pub async fn query_vec<'a, T: Row + Send + 'a>(
-        &'a mut self,
+    pub async fn query_vec<T: Row + Send + 'static>(
+        &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
     ) -> Result<Vec<T>> {
 
@@ -458,8 +458,8 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     /// # Returns
     /// 
     /// An optional row deserialized into the type `T` that implements the [`Row`] trait.
-    pub async fn query_first<'a, T: Row + Send + 'a>(
-        &'a mut self,
+    pub async fn query_first<T: Row + Send + 'static>(
+        &mut self,
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
     ) -> Result<Option<T>> {
 
@@ -612,9 +612,9 @@ impl TlsConnection {
     /// # Arguments
     /// 
     /// * `destination` - A socket address to connect to, can be a string or
-    /// a tuple of (host, port).
+    ///   a tuple of (host, port).
     /// * `options` - Client options to use for the connection, such as default database
-    /// username, password, etc.
+    ///   username, password, etc.
     /// * `name` - The server name for TLS verification.
     /// * `connector` - A reference to a `tokio_rustls::TlsConnector` to use for the TLS connection.
     /// 
