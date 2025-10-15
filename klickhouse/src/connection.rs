@@ -197,10 +197,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     /// This function will return a stream without 'Unpin' bound, so you may need to pin it before using. see [`futures_util::pin_mut!`]
     pub async fn query_raw<'a>(&'a mut self, query:impl TryInto<ParsedQuery, Error = KlickhouseError>) -> Result<impl Stream<Item = Result<Block>> + Send  + 'a> {
         self.send_query(query).await?;
-        self.receive_blocks().map(|stream| ::tokio_stream::StreamExt::filter(stream, | response | match response {
-            Ok(block) => block.rows > 0,
-            Err(_) => true,
-        }))
+        self.receive_blocks()
     }
 
     /// Sends a query string with streaming associated data (i.e. insert) over native protocol.
@@ -328,7 +325,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
     ) -> Result<impl Stream<Item = Result<T>> + Send  + 'a> {
         
         let stream = self.query_raw(query).await?;
-        
+
         Ok(stream.flat_map(|b| match b {
             Ok(mut block) => stream::iter(
                 block
@@ -337,7 +334,7 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
                     .map(|m| T::deserialize_row(m))
                     .collect::<Vec<_>>(),
             ),
-            Err(e) => stream::iter(vec![Err(e)]),
+                Err(e) => stream::iter(vec![Err(e)]),
         }))
     }
 
@@ -504,22 +501,19 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
 
         self.send_query(query).await?;
 
-
-
-         loop {
-            if let Some(block_result) = self.receive_block().await {
-                let mut block = block_result?;
-                if let Some(row) = block.take_iter_rows().next() {
-                    if let Some((key, ty, value)) = row.into_iter().next() {
-                        self.discard_blocks().await?;
-                        break Ok(Some((key.to_owned(), ty.clone(), value)));
-                    }
-                }
-            }
-            else {
-                break Ok(None);
+        while let Some(block_result) = self.receive_block().await {
+            let block = block_result?;
+            if let Some(first) = block.into_first_value() {
+                // If we got a result, we need to discard the rest of the blocks
+                // to avoid memory leaks.
+                // This is because Clickhouse will send more blocks than we requested.
+                // We don't care about the rest of the blocks, so we just discard them.
+                self.discard_blocks().await?;
+                return Ok(Some(first));
             }
         }
+
+        Ok(None)
     }
 
     /// Receive progress on the queries as they execute.
