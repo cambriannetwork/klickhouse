@@ -344,6 +344,12 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
         blocks: Vec<Block>,
     ) -> Result<()> {
+
+        // Emnpty blocks, causes file error on Clickhouse side.
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
         self.send_query(query).await?;
 
         for block in blocks {
@@ -372,7 +378,12 @@ impl<R: ClickhouseRead + 'static, W: ClickhouseWrite> Connection<R, W> {
         query: impl TryInto<ParsedQuery, Error = KlickhouseError>,
         rows: Vec<T>,
     ) -> Result<()> {
-        
+
+        // Emnpty rows, causes file error on Clickhouse side.
+        if rows.is_empty() {
+            return Ok(());
+        }
+
         self.send_query(query).await?;
         
         let first_block = self.receive_block().await.ok_or_else(|| {
