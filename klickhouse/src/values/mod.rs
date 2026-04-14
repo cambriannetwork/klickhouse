@@ -350,7 +350,7 @@ impl fmt::Display for Value {
             Value::Int128(x) => write!(f, "{x}::Int128"),
             Value::Int256(x) => write!(f, "{x}::Int256"),
             Value::UInt8(x) => write!(f, "{x}"),
-            Value::Bool(x) => write!(f, "{}", if *x { 1u8 } else { 0u8 }),
+            Value::Bool(x) => write!(f, "{x}"),
             Value::UInt16(x) => write!(f, "{x}"),
             Value::UInt32(x) => write!(f, "{x}"),
             Value::UInt64(x) => write!(f, "{x}"),
