@@ -1023,6 +1023,7 @@ impl Type {
             | (Type::Int128, Value::Int128(_))
             | (Type::Int256, Value::Int256(_))
             | (Type::UInt8, Value::UInt8(_))
+            | (Type::Bool, Value::Bool(_))
             | (Type::UInt16, Value::UInt16(_))
             | (Type::UInt32, Value::UInt32(_))
             | (Type::UInt64, Value::UInt64(_))
