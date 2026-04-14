@@ -21,6 +21,12 @@ fn roundtrip<T: FromSql + ToSql>(item: T, type_: &Type) -> T {
 }
 
 #[test]
+fn roundtrip_bool() {
+    assert_eq!(false, roundtrip(false, &Type::Bool));
+    assert_eq!(true, roundtrip(true, &Type::Bool));
+}
+
+#[test]
 fn roundtrip_u8() {
     assert_eq!(0u8, roundtrip(0u8, &Type::UInt8));
     assert_eq!(5u8, roundtrip(5u8, &Type::UInt8));

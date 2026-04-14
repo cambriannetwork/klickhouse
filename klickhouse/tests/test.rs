@@ -56,6 +56,7 @@ pub struct TestType {
     d_array_nulls: Vec<Option<String>>,
     d_ip4: Ipv4,
     d_ip6: Ipv6,
+    d_bool: bool,
 }
 
 #[tokio::test]
@@ -108,7 +109,8 @@ async fn test_client() {
         d_array_nulls Array(Nullable(String)),
         d_low_card_array_nulls Array(LowCardinality(Nullable(String))),
         d_ip4 IPv4,
-        d_ip6 IPv6
+        d_ip6 IPv6,
+        d_bool Bool default false
     ", bfloat16_field = bfloat16_field);
 
     super::prepare_table("test_types", &table_sql, &client).await;
@@ -119,6 +121,7 @@ async fn test_client() {
         d_ip4: "5.6.7.8".parse::<Ipv4Addr>().unwrap().into(),
         d_ip6: "ff26:0:0:0:0:0:0:c5".parse::<Ipv6Addr>().unwrap().into(),
         d_low_card_array: vec!["te1ssdsdsdsdasdasdasdsadt".to_string(), "te2st".to_string()],
+        d_bool: true,
         ..Default::default()
     };
     client
